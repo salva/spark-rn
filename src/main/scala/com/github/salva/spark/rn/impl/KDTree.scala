@@ -17,6 +17,7 @@ object KDTree {
 
   val OPTIMAL_NODES_PER_PARTITION:Int = 1000
 
+
   @tailrec
   def buildTree(nodePoints: Dataset[NodePoint],
                 prevNodes:Dataset[Node],
@@ -25,9 +26,9 @@ object KDTree {
                 level:Int): (Dataset[Node], Dataset[NodePoint]) = {
     import nodePoints.sqlContext.implicits._
 
-    println(s"Inside buildTree, level $level")
+    Util.logger.info(s"Entering KDTree.buildTree, level: $level")
 
-    println(s"partitions: nodePoints->${nodePoints.rdd.getNumPartitions}, prevNodes->${prevNodes.rdd.getNumPartitions}, prevDeadNodePoints->${prevDeadNodePoints.rdd.getNumPartitions}")
+    // println(s"partitions: nodePoints->${nodePoints.rdd.getNumPartitions}, prevNodes->${prevNodes.rdd.getNumPartitions}, prevDeadNodePoints->${prevDeadNodePoints.rdd.getNumPartitions}")
 
     val nodes =
       nodePoints
@@ -111,7 +112,7 @@ class KDTree(val ds:Dataset[(PointId, Vector)], val metric:Metric) extends RnSet
         Seq[(NodeId, NodeId)]().toDS,
         metricDistance, 0)
 
-    println("Joining nodes with points...")
+    Util.logger.info("In KDTree.autoJoinInBall, merger nodes and points")
 
     val nodePairs1 = nodePairs.joinWith(points, nodePairs("_1") === points("nodeId"))
     nodePairs1
@@ -127,7 +128,7 @@ class KDTree(val ds:Dataset[(PointId, Vector)], val metric:Metric) extends RnSet
                          metricDistance:Double,
                          level:Int):Dataset[(NodeId, NodeId)] = {
 
-    println(s"autoJoinInBallStep $level")
+    Util.logger.info(s"entering KDTree.autoJoinInBallStep, level: $level")
 
     import nodes.sqlContext.implicits._
 
@@ -153,7 +154,7 @@ class KDTree(val ds:Dataset[(PointId, Vector)], val metric:Metric) extends RnSet
         }
         .checkpoint
 
-    println(next.map(p => s"${p._1} <=> ${p._2}").collect.mkString("next:\n[ ", "\n  ", " ]\n"))
+    // println(next.map(p => s"${p._1} <=> ${p._2}").collect.mkString("next:\n[ ", "\n  ", " ]\n"))
 
     val leafSoFar =
       start

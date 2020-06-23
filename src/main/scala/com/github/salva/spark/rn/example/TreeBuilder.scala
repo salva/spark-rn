@@ -1,8 +1,11 @@
 package com.github.salva.spark.rn.example
 
+import com.github.salva.spark.rn.RnSet.PointId
 import com.github.salva.spark.rn.generator.random.Uniform
 import com.github.salva.spark.rn.{Box, RnSet}
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.mllib.linalg.Vector
+
 
 object TreeBuilder {
   def main(args: Array[String]): RnSet = {
@@ -13,7 +16,11 @@ object TreeBuilder {
   }
 
   def buildTree(spark: SparkSession, n:Int, dim:Int):RnSet = {
-    val points = Uniform.generateDataset(spark, n, Box.cube(dim))
+    val points = generateSampleData(spark, n, dim)
     RnSet(points)
+  }
+
+  def generateSampleData(spark: SparkSession, n:Int, dim:Int):Dataset[(PointId, Vector)] = {
+    Uniform.generateDataset(spark, n, Box.cube(dim))
   }
 }
