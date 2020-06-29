@@ -1,4 +1,4 @@
-package com.github.salva.spark.rn.impl
+package com.github.salva.spark.rn.impl.common
 
 import org.slf4j.LoggerFactory
 

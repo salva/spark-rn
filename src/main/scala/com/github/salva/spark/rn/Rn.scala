@@ -11,6 +11,8 @@ object Rn {
     Iterator.range(0, u.size).foreach(i => f(i, u(i), v(i)))
   }
 
+  def apply(values:Double*) = new DenseVector(values.toArray)
+
   def apply(values: Array[Double]) = new DenseVector(values)
 
   def fill(dim:Int)(value:Double) = new DenseVector(Array.fill(dim)(value))

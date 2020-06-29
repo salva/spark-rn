@@ -1,8 +1,10 @@
-package com.github.salva.spark.rn.impl
+package com.github.salva.spark.rn.impl.kdtree
 
 import com.github.salva.spark.rn.RnSet.PointId
-import com.github.salva.spark.rn.impl.KDTree.NodeId
-import com.github.salva.spark.rn.{Box, Metric, RnSet}
+import com.github.salva.spark.rn.impl.common.Util
+import com.github.salva.spark.rn.impl.kdtree.KDTree.NodeId
+import com.github.salva.spark.rn.impl.tree.Tree
+import com.github.salva.spark.rn.{Box, Metric}
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.expressions.scalalang.typed.count
@@ -77,46 +79,44 @@ object KDTree {
   }
 }
 
-case class NodePoint(nodeId: KDTree.NodeId, pointId:PointId, rn:Vector) {
+case class NodePoint(nodeId: KDTree.NodeId, pointId:PointId, rn:Vector)
+  extends com.github.salva.spark.rn.impl.tree.NodePoint[KDTree.NodeId] {
+
   override def toString = s"NodePoint(nodeId: $nodeId, pointId: $pointId, rn:$rn)"
 }
 
-case class Node(nodeId:NodeId, parentNodeId:NodeId, box:Box, count:Long, leaf:Boolean) {
+case class Node(nodeId:NodeId, parentNodeId:NodeId, box:Box, count:Long, leaf:Boolean)
+  extends com.github.salva.spark.rn.impl.tree.Node[KDTree.NodeId] {
   override def toString = s"Node(nodeId: $nodeId, parentNodeId: $parentNodeId, box: $box, count: $count, leaf:$leaf)"
 }
 
-class KDTree(val ds:Dataset[(PointId, Vector)], val metric:Metric) extends RnSet {
+class KDTree(val ds:Dataset[(PointId, Vector)], val metric:Metric)
+  extends Tree[KDTree.NodeId, Node, NodePoint] {
 
-  val (nodes, points) = {
+  def rootNodeId:NodeId = KDTree.ROOT_INDEX
+
+  val (nodes, nodePoints) = {
     import ds.sqlContext.implicits._
     KDTree.buildTree(ds.map(p => NodePoint(KDTree.ROOT_INDEX, p._1, p._2)),
       Seq[Node]().toDS, Seq[NodePoint]().toDS, metric, 0)
   }
-
-  def dump(dumpPoints:Boolean=false) = {
-    println(nodes.orderBy("nodeId").collect.toList.mkString("Tree nodes:\n[ - ", "\n  - ", " ]\n\n"))
-    if (dumpPoints)
-      println(points.orderBy("nodeId", "pointId").collect.toList.mkString("Points:\n[ - ", "\n  - ", " ]\n\n"))
-  }
-
-  case class NodePair(a:NodeId, b:NodeId, distance:Double)
 
   override def autoJoinInBall(distance:Double):Dataset[(PointId, PointId, Double)] = {
     import nodes.sqlContext.implicits._
 
     val metricDistance = metric.start(distance)
 
-    val root = nodes.where(nodes("nodeId") === lit(KDTree.ROOT_INDEX)).first()
+    val root = nodes.where(nodes("nodeId") === lit(rootNodeId)).first()
     val nodePairs =
       autoJoinInBallStep(Seq((root, root)).toDS,
-        Seq[(NodeId, NodeId)]().toDS,
+        (Seq():Seq[(NodeId, NodeId)]).toDS,
         metricDistance, 0)
 
     Util.logger.info("In KDTree.autoJoinInBall, merger nodes and points")
 
-    val nodePairs1 = nodePairs.joinWith(points, nodePairs("_1") === points("nodeId"))
+    val nodePairs1 = nodePairs.joinWith(nodePoints, nodePairs("_1") === nodePoints("nodeId"))
     nodePairs1
-      .joinWith(points, nodePairs1("_1._2") === points("nodeId"))
+      .joinWith(nodePoints, nodePairs1("_1._2") === nodePoints("nodeId"))
       .map { case (((_, _), pointA), pointB) => (pointA.pointId, pointB.pointId, metric.distance(pointA.rn, pointB.rn)) }
       .filter(_._3 <= metricDistance)
       .distinct
@@ -144,7 +144,7 @@ class KDTree(val ds:Dataset[(PointId, Vector)], val metric:Metric) extends RnSet
     val noLeaf = start.filter((start("_1.leaf") === lit(false)) && (start("_2.leaf") === lit(false)))
     val nextNoLeaf1 = noLeaf.joinWith(nodes, noLeaf("_1.nodeId") === nodes("parentNodeId"))
     val nextNoLeaf = nextNoLeaf1.joinWith(nodes, nextNoLeaf1("_1._2.nodeId") === nodes("parentNodeId"))
-        .map { case (((_, _), nodeA), nodeB) => (nodeA, nodeB) }
+      .map { case (((_, _), nodeA), nodeB) => (nodeA, nodeB) }
 
     val next =
       nextLeafOne
@@ -166,4 +166,5 @@ class KDTree(val ds:Dataset[(PointId, Vector)], val metric:Metric) extends RnSet
     if (next.isEmpty) leafSoFar.cache
     else autoJoinInBallStep(next, leafSoFar, metricDistance, level+1)
   }
+
 }

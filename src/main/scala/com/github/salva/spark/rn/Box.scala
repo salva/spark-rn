@@ -68,6 +68,18 @@ case class Box(val a:Vector, val b:Vector) extends Serializable {
     }
   }
 
+  def volume = {
+    var v = 1.0
+    Rn.foreach2(a, b) { (i, xa, xb) => v *= (xb - xa) }
+    v
+  }
+
+  def ab = {
+    val v = b.toArray.clone
+    Rn.foreach(a) { (i, ax) => v(i) -= ax }
+    Rn(v)
+  }
+
   override def toString = s"Box(${a}-${b})"
 }
 
@@ -94,6 +106,8 @@ object Box {
     }
     Box(Rn(av), Rn(bv))
   }
+
+  def foreach(box:Box)(f:(Int, Double, Double) => Unit):Unit = Rn.foreach2(box.a, box.b)(f)
 
   def aggregator[T](extract:T => Vector): TypedColumn[T,Box] = new BoxAggregator(extract).toColumn
 

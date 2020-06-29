@@ -8,11 +8,16 @@ import org.apache.spark.mllib.linalg.Vector
 
 
 object TreeBuilder {
-  def main(args: Array[String]): RnSet = {
-    val n = if (args.length > 0) args(0).toInt else 20
+  def main(args: Array[String]): Unit = {
+    val n = if (args.length > 0) args(0).toInt else 20000000
     val dim = if (args.length > 1) args(1).toInt else 2
     val spark = SparkSession.builder().master("local[*]").getOrCreate()
-    buildTree(spark, n, dim)
+    spark.sparkContext.setCheckpointDir("/tmp/spark-checkpoints")
+
+    org.apache.log4j.Logger.getRootLogger.setLevel(org.apache.log4j.Level.toLevel("WARN"))
+
+    val rnSet = spark.time(buildTree(spark, n, dim))
+    rnSet.dump(false)
   }
 
   def buildTree(spark: SparkSession, n:Int, dim:Int):RnSet = {
@@ -21,6 +26,8 @@ object TreeBuilder {
   }
 
   def generateSampleData(spark: SparkSession, n:Int, dim:Int):Dataset[(PointId, Vector)] = {
-    Uniform.generateDataset(spark, n, Box.cube(dim))
+    val data = Uniform.generateDataset(spark, n, Box.cube(dim))
+    println("Data generated")
+    data
   }
 }
