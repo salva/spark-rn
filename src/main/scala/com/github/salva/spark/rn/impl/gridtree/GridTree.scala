@@ -13,21 +13,18 @@ import org.apache.spark.sql.expressions.scalalang.typed.count
 import org.apache.spark.sql.functions.lit
 
 case class Node(nodeId:GridTree.NodeId, parentNodeId:GridTree.NodeId, box:Box,
-                divisions:Option[Array[Int]], count:Long)
+                divisions:Option[Array[Int]], count:Long, leaf:Boolean)
   extends com.github.salva.spark.rn.impl.tree.Node[GridTree.NodeId]
 {
 
-  override def toString = s"Node($nodeId, $parentNodeId, $box, ${divisionsToString}, $count)"
+  override def toString = s"Node($nodeId, $parentNodeId, $box, ${if (leaf) "leaf" else divisionsToString}, $count)"
 
   private def divisionsToString = {
     divisions match {
       case Some(array) => array.mkString("[", ",", "]")
-      case _ => "leaf"
+      case _ => "none"
     }
   }
-
-  def leaf = divisions.isEmpty
-
 }
 
 case class NodePoint(nodeId:GridTree.NodeId, pointId:PointId, rn:Vector)
@@ -51,21 +48,18 @@ object GridTree {
         .agg(Box.aggregator(_.rn), count[NodePoint](_.pointId))
         .map {
           case (nodeId, box, count) => {
-            val divisions =
-              if ((count > GridTree.MAX_LEAF_SIZE) && (metric.boxDiameter(box) > 0))
-                Some(calculateDivisions(box.ab))
-              else None
-
+            val leaf = (count <= GridTree.MAX_LEAF_SIZE) || (metric.boxDiameter(box) == 0.0)
+            val divisions = if (leaf) None else Some(calculateDivisions(box.ab))
             val nodeIdBI = BigInt(nodeId)
             val parentNodeId = (nodeIdBI / GridTree.MAX_PARTITIONS).toString
-            Node(nodeId, parentNodeId, box, divisions, count)
+            Node(nodeId, parentNodeId, box, divisions, count, leaf)
           }
         }
         .cache
 
     Util.logger.warn(s"Nodes generated: ${nodes.count}")
 
-    if (nodes.count < 10) {
+    if (nodes.count < 30) {
       println(nodes.collect.toList.mkString("nodes:\n[ ", "\n  ", " ]\n"))
 
     }
@@ -85,7 +79,7 @@ object GridTree {
       val liveNodePoints =
         nodeNodePoints
           .flatMap {
-            case (Node(nodeId, _, box, Some(divisions), _), nodePoint) => {
+            case (Node(nodeId, _, box, Some(divisions), _,_), nodePoint) => {
               val parentNodeIdBI = BigInt(nodeId)
               val nodeIdStr = (parentNodeIdBI * MAX_PARTITIONS + partitionIx(nodePoint.rn, box, divisions)).toString
               Some(NodePoint(nodeIdStr, nodePoint.pointId, nodePoint.rn))
@@ -180,12 +174,15 @@ class GridTree(val ds:Dataset[(PointId, Vector)], val metric:Metric)
                          metricDistance:Double,
                          level:Int):Dataset[(NodeId, NodeId)] = {
 
-    Util.logger.info(s"entering KDTree.autoJoinInBallStep, level: $level")
+    Util.logger.warn(s"entering GridTree.autoJoinInBallStep, level: $level")
 
     import nodes.sqlContext.implicits._
 
-    val leafA = start.filter((start("_1.leaf") === lit(true)) && (start("_1.leaf") === lit(false)))
-    val leafB = start.filter((start("_1.leaf") === lit(false)) && (start("_1.leaf") === lit(true)))
+    println(s"start: ${start.count}")
+    println(start.take(20).mkString("start:\n[ ", "\n  ", " ]\n"))
+
+    val leafA = start.filter((start("_1.leaf") === lit(true)) && (start("_2.leaf") === lit(false)))
+    val leafB = start.filter((start("_1.leaf") === lit(false)) && (start("_2.leaf") === lit(true)))
       .map { case (nodeA, nodeB) => (nodeB, nodeA) }
     val leafOne = leafA.unionAll(leafB)
     val nextLeafOne =
@@ -197,6 +194,8 @@ class GridTree(val ds:Dataset[(PointId, Vector)], val metric:Metric)
     val nextNoLeaf1 = noLeaf.joinWith(nodes, noLeaf("_1.nodeId") === nodes("parentNodeId"))
     val nextNoLeaf = nextNoLeaf1.joinWith(nodes, nextNoLeaf1("_1._2.nodeId") === nodes("parentNodeId"))
       .map { case (((_, _), nodeA), nodeB) => (nodeA, nodeB) }
+
+    println(s"noLeaf: ${noLeaf.count}, leafOne: ${leafOne.count}")
 
     val next =
       nextLeafOne
@@ -210,10 +209,12 @@ class GridTree(val ds:Dataset[(PointId, Vector)], val metric:Metric)
 
     val leafSoFar =
       start
-        .filter((start("_1.leaf") === lit(true)) && (start("_1.leaf") === lit(true)))
+        .filter((start("_1.leaf") === lit(true)) && (start("_2.leaf") === lit(true)))
         .map { case (nodeA, nodeB) => (nodeA.nodeId, nodeB.nodeId) }
         .checkpoint
         .unionAll(prevLeaf)
+
+    println(s"leafSoFar: ${leafSoFar.count}")
 
     if (next.isEmpty) leafSoFar.cache
     else autoJoinInBallStep(next, leafSoFar, metricDistance, level+1)

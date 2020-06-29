@@ -9,7 +9,7 @@ import org.apache.spark.mllib.linalg.Vector
 
 object TreeBuilder {
   def main(args: Array[String]): Unit = {
-    val n = if (args.length > 0) args(0).toInt else 20000000
+    val n = if (args.length > 0) args(0).toInt else 5000000
     val dim = if (args.length > 1) args(1).toInt else 2
     val spark = SparkSession.builder().master("local[*]").getOrCreate()
     spark.sparkContext.setCheckpointDir("/tmp/spark-checkpoints")
@@ -18,6 +18,14 @@ object TreeBuilder {
 
     val rnSet = spark.time(buildTree(spark, n, dim))
     rnSet.dump(false)
+  }
+
+  def getSpark:SparkSession = {
+    val spark = SparkSession.builder().master("local[*]").getOrCreate()
+    spark.sparkContext.setCheckpointDir("/tmp/spark-checkpoints")
+
+    org.apache.log4j.Logger.getRootLogger.setLevel(org.apache.log4j.Level.toLevel("WARN"))
+    spark
   }
 
   def buildTree(spark: SparkSession, n:Int, dim:Int):RnSet = {
